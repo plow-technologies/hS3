@@ -26,7 +26,6 @@ import Network.HTTP
 import Network.URI
 import System.Time
 import Data.List.Utils
-import Data.List(lookup)
 import Data.Digest.MD5(hash)
 import Codec.Binary.Base64 (encode)
 
@@ -57,6 +56,7 @@ data StorageClass = STANDARD | REDUCED_REDUNDANCY
   deriving (Read, Show, Eq)
 
 -- Amazon header key for storage class
+storageHeader :: String
 storageHeader = "x-amz-storage-class"
 
 -- | Add required headers for the storage class.
@@ -181,6 +181,7 @@ headersFromResponse r =
     let respheaders = rspHeaders r
     in map (\x -> case x of
                     Header (HdrCustom name) val -> (name, (mimeDecode val))
+                    _ -> error "headersFromResponse: invalid headers"
            ) (filter isAmzHeader respheaders)
 
 -- | Delete an object.  Only bucket and object name need to be

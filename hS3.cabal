@@ -65,3 +65,10 @@ Library
 
 Executable     hs3
   main-is:        hS3.hs
+  Other-Modules:
+    Network.AWS.AWSConnection
+    Network.AWS.AWSResult
+    Network.AWS.ArrowUtils
+    Network.AWS.Authentication
+    Network.AWS.S3Bucket
+    Network.AWS.S3Object

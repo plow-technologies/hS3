@@ -28,8 +28,6 @@ import Network.Stream (Result)
 import Network.URI as URI
 import qualified Data.ByteString.Lazy.Char8 as L
 
-import Data.ByteString.Char8 (pack, unpack)
-
 import Data.HMAC
 import Codec.Binary.Base64 (encode, decode)
 import Codec.Utils (Octet)
@@ -48,11 +46,12 @@ import Text.Regex
 
 import Control.Arrow
 import Control.Arrow.ArrowTree
+import Control.Arrow.IOStateListArrow (IOSLA)
+import Data.Tree.NTree.TypeDefs (NTree)
 import Text.XML.HXT.Arrow.XmlArrow
-import Text.XML.HXT.Arrow.XmlOptions
-import Text.XML.HXT.DOM.XmlKeywords
 import Text.XML.HXT.Arrow.XmlState
 import Text.XML.HXT.Arrow.ReadDocument
+import Text.XML.HXT.DOM.TypeDefs (XNode)
 
 -- | An action to be performed using S3.
 data S3Action =
@@ -98,7 +97,7 @@ headersFromAction = map (\(k,v) -> case k of
                                     "Content-Type" -> Header HdrContentType v
                                     "Content-Length" -> Header HdrContentLength v
                                     "Content-MD5" -> Header HdrContentMD5 v
-                                    otherwise -> Header (HdrCustom k) (mimeEncodeQP v))
+                                    _ -> Header (HdrCustom k) (mimeEncodeQP v))
                     . s3metadata
 
 -- | Inspect HTTP body, and add a @Content-Length@ header with the
@@ -181,6 +180,7 @@ combineHeaders = map mergeSameHeaders
 
 -- | Headers with same name should have values merged.
 mergeSameHeaders :: [(String, String)] -> (String, String)
+mergeSameHeaders [] = error "mergeSameHeaders: expected non-empty list argument"
 mergeSameHeaders h@(x:_) = let values = map snd h
                      in ((fst x), (concat $ intersperse "," values))
 
@@ -201,7 +201,7 @@ isAmzHeader :: Header -> Bool
 isAmzHeader h =
     case h of
       Header (HdrCustom k) _ -> isPrefix amzHeader k
-      otherwise -> False
+      _ -> False
 
 -- | is the first list a prefix of the second?
 isPrefix :: Eq a => [a] -> [a] -> Bool
@@ -217,7 +217,7 @@ canonicalizeResource a = bucket ++ uri ++ subresource
     where uri = '/' : s3object a
           bucket = case (s3bucket a) of
                      b@(_:_) -> '/' : map toLower b
-                     otherwise -> ""
+                     _ -> ""
           subresource = case (subresource_match) of
                           [] -> ""
                           x:_ -> x
@@ -231,21 +231,13 @@ addDateToReq :: HTTP.HTTPRequest L.ByteString -- ^ Request to modify
 addDateToReq r d = r {HTTP.rqHeaders =
                           HTTP.Header HTTP.HdrDate d : HTTP.rqHeaders r}
 
--- | Add an expiration date to a request.
-addExpirationToReq :: HTTP.HTTPRequest L.ByteString -> String -> HTTP.HTTPRequest L.ByteString
-addExpirationToReq r = addHeaderToReq r . HTTP.Header HTTP.HdrExpires
-
--- | Attach an HTTP header to a request.
-addHeaderToReq :: HTTP.HTTPRequest L.ByteString -> Header -> HTTP.HTTPRequest L.ByteString
-addHeaderToReq r h = r {HTTP.rqHeaders = h : HTTP.rqHeaders r}
-
 -- | Get hostname to connect to. Needed for european buckets
 s3Hostname :: S3Action -> String
 s3Hostname a =
     let s3host = awsHost (s3conn a) in
     case (s3bucket a) of
         b@(_:_) -> b ++ "." ++ s3host
-        otherwise -> s3host
+        _ -> s3host
 
 -- | Get current time in HTTP 1.1 format (RFC 2616)
 --   Numeric time zones should be used, but I'd rather not subvert the
@@ -329,8 +321,8 @@ createAWSResult a b = either handleError handleSuccess b
                                                 Just l -> runAction' a (getHostname l)
                                                 Nothing -> return (Left $ AWSError "Temporary Redirect" "Redirect without location header")  -- not good
                               (4,0,4) -> return (Left $ AWSError "NotFound" "404 Not Found")  -- no body, so no XML to parse
-                              otherwise -> do e <- parseRestErrorXML (L.unpack (rspBody s))
-                                              return (Left e)
+                              _  -> do e <- parseRestErrorXML (L.unpack (rspBody s))
+                                       return (Left e)
           -- Get hostname part from http url.
           getHostname :: String -> String
           getHostname h = case parseURI h of
@@ -347,11 +339,12 @@ parseRestErrorXML x =
          [] -> return (AWSError "NoErrorInMsg"
                        ("HTTP Error condition, but message body"
                         ++ "did not contain error code."))
-         x:xs -> return x
+         y:_ -> return y
 
 
 -- | Find children of @Error@ entity, use their @Code@ and @Message@
 --   entities to create an 'AWSError'.
+processRestError :: IOSLA (XIOState ()) (NTree XNode) ReqError
 processRestError = deep (isElem >>> hasName "Error") >>>
                    split >>> first (text <<< atTag "Code") >>>
                    second (text <<< atTag "Message") >>>
