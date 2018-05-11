@@ -37,5 +37,5 @@ data ReqError =
 -- | Pretty print an error message.
 prettyReqError :: ReqError -> String
 prettyReqError r = case r of
-                     AWSError a b -> b
+                     AWSError _a b -> b
                      NetworkError c -> show c

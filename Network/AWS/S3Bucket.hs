@@ -39,9 +39,6 @@ import qualified Data.ByteString.Lazy.Char8 as L
 import Data.Char (toLower, isAlphaNum)
 import Data.List (isInfixOf)
 
-import qualified Data.Tree.NTree.TypeDefs
-
-import Control.Monad
 import System.Random (randomIO)
 import Codec.Utils
 import Data.Digest.MD5
@@ -49,11 +46,11 @@ import Codec.Text.Raw
 
 import Control.Arrow
 import Control.Arrow.ArrowTree
+import Control.Arrow.IOStateListArrow (IOSLA)
 import Text.XML.HXT.Arrow.XmlArrow
-import Text.XML.HXT.Arrow.XmlOptions
-import Text.XML.HXT.DOM.XmlKeywords
 import Text.XML.HXT.Arrow.XmlState
 import Text.XML.HXT.Arrow.ReadDocument
+import Data.Tree.NTree.TypeDefs (NTree)
 import Text.XML.HXT.DOM.TypeDefs
 
 data S3Bucket = S3Bucket { bucket_name :: String,
@@ -84,7 +81,7 @@ createBucketWithPrefixIn aws pre location =
        res <- createBucketIn aws name location
        either (\x -> case x of
                        AWSError _ _ -> createBucketWithPrefixIn aws pre location
-                       otherwise -> return (Left x))
+                       _ -> return (Left x))
                   (\_ -> return (Right name)) res
 
 -- | see createBucketWithPrefixIn, but hardcoded for the US
@@ -268,7 +265,7 @@ getObjectStorageClass :: AWSConnection
                       -> IO (AWSResult StorageClass)
 getObjectStorageClass c obj =
     do res <- listObjects c (obj_bucket obj) (ListRequest (obj_name obj) "" "" 1)
-       return (either Left (\(t,xs) -> Right (head (map storageClass xs))) res)
+       return (either Left (\(_,xs) -> Right (head (map storageClass xs))) res)
 
 -- | Determine if ListBucketResult is truncated.  It would make sense
 --   to combine this with the query for list results, so we didn't
@@ -285,7 +282,7 @@ processTruncation = (text <<< atTag "IsTruncated")
                     >>> arr (\x -> case (map toLower x) of
                                      "true" -> True
                                      "false" -> False
-                                     otherwise -> False)
+                                     _ -> False)
 
 getListResults :: String -> IO [ListResult]
 getListResults s = runX (readString [withValidate no] s >>> processListResults)
@@ -319,7 +316,7 @@ setVersioningConfiguration aws bucket vc =
     do res <- Auth.runAction (S3Action aws bucket "" "?versioning" [] (L.pack (versioningConfigurationToXML vc)) PUT)
        case res of
          Left x -> return (Left x)
-         Right y -> return (Right ())
+         Right _ -> return (Right ())
 
 versioningConfigurationToXML :: VersioningConfiguration -> String
 versioningConfigurationToXML vc =
@@ -349,15 +346,17 @@ parseVersionConfigXML s =
                   [] -> (VersioningConfiguration VersioningSuspended True)
                   x:_ -> x
 
+processVersionConfig :: IOSLA (XIOState ()) (NTree XNode) VersioningConfiguration
 processVersionConfig =
   deep (isElem >>> hasName "VersioningConfiguration") >>>
     ((text <<< atTag "Status")
     >>> arr (\v -> case (map toLower v) of
                     "suspended" -> (VersioningConfiguration VersioningSuspended False)
                     "enabled" -> (VersioningConfiguration VersioningEnabled False)
+                    _ -> error "processVersionConfig: invalid VersionConfig"
             ))
     <+>
-    arr (\x -> (VersioningConfiguration VersioningDisabled False))
+    arr (\_ -> (VersioningConfiguration VersioningDisabled False))
 
 -- | Remove quote characters from a 'String'.
 unquote :: String -> String

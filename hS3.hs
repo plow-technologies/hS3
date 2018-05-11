@@ -12,8 +12,6 @@ import Network.AWS.S3Bucket
 import Network.AWS.AWSConnection
 import Network.AWS.AWSResult
 import System.Environment
-import System.IO
-import Data.Maybe
 import Network.AWS.S3Object
 import qualified Data.ByteString.Lazy.Char8 as L
 
@@ -37,8 +35,8 @@ main = do
     ["go", bucket, gkey ] ->
         do c <- withConn $ \g -> getObject g $ S3Object bucket gkey "" [] L.empty
            L.putStr $ obj_data c
-    ["do", bucket, key] ->
-        withConn $ \g -> deleteObject g $ S3Object bucket key "" [] L.empty
+    ["do", bucket, key'] ->
+        withConn $ \g -> deleteObject g $ S3Object bucket key' "" [] L.empty
     ["so", bucket, skey ] ->
         (\c ->  withConn $ \g -> sendObject g $ S3Object bucket skey "" [] c)
             =<< L.getContents
